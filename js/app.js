@@ -3,7 +3,7 @@ import { Recorder, fmtDuration, fmtDistance, fmtSpeed, fmtPace, weeklyTotals, pe
 import * as db from './db.js';
 
 const $ = (id) => document.getElementById(id);
-const DEFAULTS = { units: 'km', step: 0.1, cap: 12, presets: '4, 6, 8, 10', weight: 75, wake: true };
+const DEFAULTS = { units: 'km', step: 0.1, cap: 12, presets: '4, 6, 8, 10', weight: 75, wake: true, remoteStart: false };
 const settings = { ...DEFAULTS, ...JSON.parse(localStorage.getItem('treadlog.settings') || '{}') };
 const saveSettings = () => localStorage.setItem('treadlog.settings', JSON.stringify(settings));
 
@@ -14,6 +14,8 @@ let lastData = {};
 let targetSpeed = 0;
 let targetIncline = 0;
 let machine = 'idle'; // idle | running | paused | safety
+let zeroCount = 0;
+let lastStarted = 0;
 let wakeLock = null;
 let lastAutosave = 0;
 let sendTimer = null;
@@ -89,10 +91,17 @@ function renderConn() {
 
 function renderButtons() {
   const running = machine === 'running';
+  const live = tm.state === 'connected';
   $('startBtn').textContent = machine === 'paused' ? 'Resume' : 'Start';
-  $('startBtn').hidden = running;
+  // Many treadmills (incl. the F37) ignore remote Start, so it is opt-in (Settings).
+  $('startBtn').hidden = running || !settings.remoteStart;
   $('pauseBtn').hidden = !running;
-  $('stopBtn').disabled = tm.state !== 'connected' || machine === 'idle';
+  $('stopBtn').hidden = machine === 'idle';
+  const hint = $('startHint');
+  hint.hidden = !live || running;
+  hint.textContent = machine === 'paused'
+    ? 'Paused. Press Start on the treadmill to resume.'
+    : 'Press Start on the treadmill. TreadLog takes over once the belt is moving.';
 }
 
 function renderLive() {
@@ -171,7 +180,7 @@ tm.addEventListener('state', async (e) => {
 tm.addEventListener('gaveup', async () => { toast('Could not reconnect. Run saved.', 'error', 0); if (rec.active) await finishRun('lost'); setWake(false); });
 tm.addEventListener('status', (e) => {
   const { op } = e.detail;
-  if (op === 0x04) { machine = 'running'; $('banner').hidden = true; }
+  if (op === 0x04) { machine = 'running'; lastStarted = Date.now(); zeroCount = 0; $('banner').hidden = true; }
   else if (op === 0x02) { machine = e.detail.param === 0x02 ? 'paused' : 'idle'; }
   else if (op === 0x03) { machine = 'idle'; toast('Safety key pulled – treadmill stopped.', 'error', 0); }
   renderButtons();
@@ -180,7 +189,14 @@ tm.addEventListener('data', async (e) => {
   const d = e.detail;
   lastData = { ...lastData, ...d };
   if (d.speed !== undefined) {
-    if (d.speed > 0.5 && machine !== 'paused') machine = 'running';
+    if (d.speed > 0.5) {
+      zeroCount = 0;
+      if (machine !== 'paused') machine = 'running';
+    } else {
+      zeroCount += 1;
+      // belt stopped (allow a 15 s grace for the start countdown)
+      if (machine === 'running' && zeroCount >= 4 && Date.now() - lastStarted > 15000) { machine = 'idle'; targetSpeed = 0; }
+    }
     if (d.speed > 0.5 && !targetSpeed) targetSpeed = d.speed;
     if (!sendTimer && d.speed > 0.5) targetSpeed = d.speed; // follow console changes when not mid-tap
   }
@@ -291,7 +307,9 @@ function bindSettings() {
   $('setPresets').value = settings.presets;
   $('setWeight').value = settings.weight;
   $('setWake').checked = settings.wake;
+  $('setRemote').checked = settings.remoteStart;
   const upd = () => {
+    settings.remoteStart = $('setRemote').checked;
     settings.units = $('setUnits').value;
     settings.step = Number($('setStep').value);
     settings.cap = Math.min(25, Math.max(2, Number($('setCap').value) || DEFAULTS.cap));
@@ -300,10 +318,10 @@ function bindSettings() {
     settings.wake = $('setWake').checked;
     saveSettings();
     rec.weightKg = settings.weight;
-    renderUnits(); renderPresets(); renderLive(); renderHistory();
+    renderUnits(); renderPresets(); renderLive(); renderHistory(); renderButtons();
     setWake(settings.wake && tm.state === 'connected');
   };
-  ['setUnits', 'setStep', 'setCap', 'setPresets', 'setWeight', 'setWake'].forEach((id) => $(id).addEventListener('change', upd));
+  ['setUnits', 'setStep', 'setCap', 'setPresets', 'setWeight', 'setWake', 'setRemote'].forEach((id) => $(id).addEventListener('change', upd));
 }
 
 // ---------- wiring ----------
@@ -333,6 +351,9 @@ function init() {
   $('startBtn').addEventListener('click', async () => {
     const r = await tm.start().catch((e) => { toast(`Start failed: ${e.message}`, 'error'); return -1; });
     if (r !== null && r !== 1 && r !== -1) toast(`Treadmill refused to start (code ${r}). Check the safety key.`, 'error');
+    setTimeout(() => {
+      if (tm.state === 'connected' && machine !== 'running') toast('The treadmill ignored the remote Start. Press Start on the treadmill instead.', 'error', 8000);
+    }, 6000);
   });
   $('pauseBtn').addEventListener('click', () => tm.pause().catch((e) => toast(`Pause failed: ${e.message}`, 'error')));
   $('stopBtn').addEventListener('click', async () => {

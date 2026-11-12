@@ -60,6 +60,7 @@ button.big:active { background: var(--line); }
 .act.stop { background: #3a1d1a; border-color: var(--danger); color: #ffd7d2; }
 .act:disabled, button.big:disabled, .presets button:disabled { opacity: .35; cursor: default; }
 .hint { margin: 0; color: var(--muted); font-size: 13px; text-align: center; }
+.start-hint { color: var(--accent); font-size: 17px; font-weight: 600; padding: 6px 0; }
 
 /* History */
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-bottom: 12px; }

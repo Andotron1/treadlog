@@ -57,6 +57,7 @@
           <button id="pauseBtn" class="act" type="button">Pause</button>
           <button id="stopBtn" class="act stop" type="button">Stop</button>
         </div>
+        <p id="startHint" class="hint start-hint" hidden></p>
         <p class="hint">Keep the safety key clipped on. The console stop button always works.</p>
       </div>
     </div>
@@ -92,6 +93,9 @@
       </label>
       <label class="field">Body weight <span class="sub">(kg, only for calorie estimate)</span>
         <input id="setWeight" type="number" min="30" max="250" step="1">
+      </label>
+      <label class="field row">Show remote Start button <span class="sub">(experimental, the F37 ignores it)</span>
+        <input id="setRemote" type="checkbox">
       </label>
       <label class="field row">Keep screen awake while connected
         <input id="setWake" type="checkbox">
